@@ -1,2 +1,6 @@
 python-telegram-bot==20.8
 pandas
+gspread
+google-auth
+python-telegram-bot
+
