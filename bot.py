@@ -5,6 +5,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 from datetime import datetime
 
+# Load credentials from Railway environment variable
+SERVICE_ACCOUNT_INFO = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+
+# Authenticate using the loaded credentials
+creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO)
+
 # ✅ Enable logging for debugging
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
