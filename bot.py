@@ -7,11 +7,14 @@ from datetime import datetime
 import json
 import os
 
+# Get the JSON string from the environment variable
+google_creds = os.getenv("GOOGLE_CREDENTIALS")
 
+if google_creds is None:
+    raise ValueError("GOOGLE_CREDENTIALS environment variable is missing!")
 
-
-# Load credentials from Railway environment variable
-SERVICE_ACCOUNT_INFO = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+# Load JSON credentials
+SERVICE_ACCOUNT_INFO = json.loads(google_creds)
 
 # Authenticate using the loaded credentials
 creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO)
