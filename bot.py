@@ -1,25 +1,10 @@
 import logging
-import gspread
-from google.oauth2.service_account import Credentials
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from pymongo import MongoClient
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, CallbackContext
 from datetime import datetime
-import json
-import os
 
-# Get the JSON string from the environment variable
-google_creds = os.getenv("GOOGLE_CREDENTIALS")
-
-if google_creds is None:
-    raise ValueError("GOOGLE_CREDENTIALS environment variable is missing!")
-
-# Load JSON credentials
-SERVICE_ACCOUNT_INFO = json.loads(google_creds)
-
-# Authenticate using the loaded credentials
-creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO)
-
-# ✅ Enable logging for debugging
+# ✅ Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -29,122 +14,100 @@ logger = logging.getLogger(__name__)
 # ✅ Telegram Bot Token
 TOKEN = "8105165579:AAFeayPJmbFfJS5nImHC7uJ222-6sa7m5Yo"
 
-# ✅ Google Sheets Configuration
-SERVICE_ACCOUNT_FILE = "C:\\Users\\ASUS\\Desktop\\ExpenseShareBot\\credentials.json"
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-SHEET_ID = "1UHSoyJ7VDXWsMc-qjEw81YpGCaFZ3NSA_X7ncZcs0FY"
+# ✅ MongoDB Connection Setup
+MONGO_URI = "mongodb+srv://expenseBotUser:Xis7IuLADOEN6vq4@cluster0.k40ou.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
-# ✅ Authenticate and connect to Google Sheets
-creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-client = gspread.authorize(creds)
-sheet = client.open_by_key(SHEET_ID).sheet1  # Select the first sheet
+client = MongoClient(MONGO_URI)
+db = client["expensesDB"]
+users_collection = db["users"]
+expenses_collection = db["expenses"]
 
-# ✅ Function to Calculate Total Expense of the Day
-def calculate_daily_total(user_name):
-    """Fetches all today's expenses from Google Sheets and sums them up."""
-    today_date = datetime.now().strftime("%d-%m-%Y")
-    records = sheet.get_all_values()  # Fetch all data from the sheet
-
-    total = 0
-    detailed_expenses = []
-    for row in records[1:]:  # Skip header row
-        if row[0] == today_date and row[1].lower() == user_name.lower():  # Match today's date and user's name
-            try:
-                amount = float(row[2])
-                total += amount  # Add the amount
-                detailed_expenses.append(f"{row[2]} - {row[3]}")
-            except ValueError:
-                logger.warning(f"Skipping invalid amount: {row[2]}")
-
-    return total, detailed_expenses
-
-# ✅ Function to Calculate Home Total Expense
-def calculate_home_total():
-    """Fetches all today's expenses from Google Sheets and sums them up for all users."""
-    today_date = datetime.now().strftime("%d-%m-%Y")
-    records = sheet.get_all_values()
-
-    home_total = 0
-    for row in records[1:]:  # Skip header row
-        if row[0] == today_date:
-            try:
-                home_total += float(row[2])
-            except ValueError:
-                logger.warning(f"Skipping invalid amount: {row[2]}")
-
-    return home_total
+VALID_NAMES = {"Kushal", "Manish", "Jagruti"}
 
 # ✅ /start Command
 async def start(update: Update, context: CallbackContext) -> None:
     """Handles the /start command."""
-    logger.info("User started the bot.")
-    await update.message.reply_text("You're already logged in, Kushal! Use /addexpense to log an expense.")
+    user_id = update.message.chat_id
+    user = users_collection.find_one({"user_id": user_id})
 
-# ✅ /addexpense Command
-async def add_expense(update: Update, context: CallbackContext) -> None:
-    """Handles the /addexpense command."""
-    logger.info("User entered /addexpense")
-    await update.message.reply_text("tamaro kharcho lakho. Aa rehte ralkhva no che : Amount-Item (50-Maggie)")
-
-# ✅ Message Handler for Expenses
-async def log_expense(update: Update, context: CallbackContext) -> None:
-    """Processes user expense input and adds it to Google Sheets."""
-    message_text = update.message.text.strip().lower()
-    user_name = update.message.from_user.first_name  # Get user's first name
-
-    logger.info(f"Received message: {message_text}")
-
-    # ✅ If user types "bas", return today's total expense
-    if message_text == "bas":
-        total_expense, details = calculate_daily_total(user_name)
-        home_total = calculate_home_total()
-        
-        # Format the message
-        formatted_expenses = "\n".join(details) if details else "No expenses recorded."
-        message = f"{formatted_expenses}\n-------------------\n💰 Total {user_name}'s expenses: ₹{total_expense}\n\n💰 Your home total expense today is: ₹{home_total}"
-        
-        # ✅ Add buttons for all users
-        keyboard = [[InlineKeyboardButton("Kushal", callback_data="kushal"),
-                     InlineKeyboardButton("Manish", callback_data="manish")],
-                    [InlineKeyboardButton("Jagruti", callback_data="jagruti"),
-                     InlineKeyboardButton("Hirva", callback_data="hirva")]]
+    if user:
+        keyboard = [[InlineKeyboardButton("📊 View Expenses", callback_data="view_expenses")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+    f"Welcome back, {user['name']}! ✅\n🚬 Mama ni Moj 🚬\nMama na ashirwad 🙏", 
+    reply_markup=reply_markup
+)
+    else:
+        await update.message.reply_text("🌹 Tamaru Shubh Naam Lakho 🌹")
 
-        await update.message.reply_text(message, reply_markup=reply_markup)
+
+# ✅ Show Expense Options (View Expenses Button Click)
+async def view_expense_options(update: Update, context: CallbackContext) -> None:
+    """Show buttons for Kushal, Manish, Jagruti."""
+    query = update.callback_query
+    keyboard = [
+        [InlineKeyboardButton("Kushal", callback_data="expenses_Kushal")],
+        [InlineKeyboardButton("Manish", callback_data="expenses_Manish")],
+        [InlineKeyboardButton("Jagruti", callback_data="expenses_Jagruti")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.message.reply_text("Select a user to view expenses:", reply_markup=reply_markup)
+
+# ✅ Show Expenses for Selected User
+async def show_user_expenses(update: Update, context: CallbackContext) -> None:
+    """Fetch and show expenses for a selected user along with total expenses."""
+    query = update.callback_query
+    _, selected_user = query.data.split("_")  # Extract username from callback data
+    
+    user = users_collection.find_one({"name": selected_user})
+    if not user:
+        await query.message.reply_text(f"❌ User {selected_user} not found.")
         return
 
-    try:
-        # Validate message format (e.g., "400-Kapda")
-        if "-" not in message_text:
-            await update.message.reply_text("❌ Invalid format! Use: Amount-Item (e.g., 50-Maggie)")
-            return
+    today_date = datetime.now().strftime("%Y-%m-%d")
 
-        amount, item = message_text.split("-", 1)
-        amount = amount.strip()
-        item = item.strip()
-        today_date = datetime.now().strftime("%d-%m-%Y")  # Get today's date
+    # ✅ Fetch user's expenses for today
+    expenses = list(expenses_collection.find({"user_id": user["user_id"], "date": today_date}))
+    
+    expense_list = [f"💰 {exp['amount']} - {exp['item']} ({exp['date']})" for exp in expenses]
+    total_user_expense = sum(exp["amount"] for exp in expenses) if expenses else 0
 
-        # Insert into Google Sheets
-        sheet.append_row([today_date, user_name, amount, item])
-        logger.info(f"✅ Expense added for {user_name}: {amount}-{item}")
+    user_expense_text = (
+        f"📊 Expenses for {selected_user}:\n" + "\n".join(expense_list) +
+        f"\n🔹 Total Expense: ₹{total_user_expense}"
+    ) if expenses else f"📊 No expenses recorded for {selected_user} today."
 
-        await update.message.reply_text(f"✅ Expense added for {user_name}: {amount}-{item}")
-    except Exception as e:
-        logger.error(f"Error adding expense: {e}")
-        await update.message.reply_text("❌ Error adding expense. Please try again.")
+    # ✅ Fetch total expenses for all users
+    all_users_expenses = expenses_collection.aggregate([
+        {"$match": {"date": today_date}},
+        {"$group": {"_id": "$user_id", "total": {"$sum": "$amount"}}}
+    ])
+
+    total_all_users = 0
+    all_users_text = "\n📊 Bdha No Total Kharach:\n"
+
+    
+    for entry in all_users_expenses:
+        user_name = users_collection.find_one({"user_id": entry["_id"]})["name"]
+        all_users_text += f"💰 {user_name}: ₹{entry['total']}\n"
+        total_all_users += entry["total"]
+    
+    all_users_text += f"🔹 Grand Total: ₹{total_all_users}"
+
+    # ✅ Send the message
+    await query.message.reply_text(user_expense_text + "\n\n" + all_users_text)
 
 # ✅ Main Function to Start the Bot
 def main():
     """Starts the bot using polling."""
     app = Application.builder().token(TOKEN).build()
-
-    # Add command handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("addexpense", add_expense))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_expense))
+    app.add_handler(CallbackQueryHandler(view_expense_options, pattern="view_expenses"))
+    app.add_handler(CallbackQueryHandler(show_user_expenses, pattern="expenses_.*"))
 
-    # Start polling
-    logger.info("🤖 Bot is running...")
+    logger.info("🤖 Bot is running and connected to MongoDB...")
     app.run_polling()
 
 # ✅ Run the bot
